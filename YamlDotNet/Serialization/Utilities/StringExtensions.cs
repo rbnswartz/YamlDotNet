@@ -21,6 +21,10 @@
 
 using System;
 using System.Text.RegularExpressions;
+#if !NETFRAMEWORK && !NETSTANDARD2_0
+using System.Text;
+using YamlDotNet.Helpers;
+#endif
 
 namespace YamlDotNet.Serialization.Utilities
 {
@@ -29,11 +33,41 @@ namespace YamlDotNet.Serialization.Utilities
     /// </summary>
     internal static class StringExtensions
     {
+#if NETFRAMEWORK || NETSTANDARD2_0
         private static string ToCamelOrPascalCase(string str, Func<char, char> firstLetterTransform)
         {
             var text = Regex.Replace(str, "([_\\-])(?<char>[a-z])", match => match.Groups["char"].Value.ToUpperInvariant(), RegexOptions.IgnoreCase);
             return firstLetterTransform(text[0]) + text.Substring(1);
         }
+#else
+        private static string ToCamelOrPascalCase(string str, Func<char, char> firstLetterTransform)
+        {
+            var inputAsSpan = str.AsSpan();
+            var output = StringBuilderPool.Rent().Builder;
+            for (var i = 0; i < inputAsSpan.Length; i++)
+            {
+                if (inputAsSpan[i] == '_' || inputAsSpan[i] == '-')
+                {
+                    continue;
+                }
+                if (i == 0)
+                {
+                    output.Append(firstLetterTransform(inputAsSpan[i]));
+                    continue;
+                }
+
+                if (inputAsSpan[i - 1] == '_' || inputAsSpan[i - 1] == '-')
+                {
+                    output.Append(char.ToUpper(inputAsSpan[i]));
+                    continue;
+                }
+
+                output.Append(inputAsSpan[i]);
+            }
+
+            return output.ToString();
+        }
+#endif
 
 
         /// <summary>
@@ -59,7 +93,6 @@ namespace YamlDotNet.Serialization.Utilities
         {
             return ToCamelOrPascalCase(str, char.ToUpperInvariant);
         }
-
         /// <summary>
         /// Convert the string from camelcase (thisIsATest) to a hyphenated (this-is-a-test) or 
         /// underscored (this_is_a_test) string
@@ -67,6 +100,7 @@ namespace YamlDotNet.Serialization.Utilities
         /// <param name="str">String to convert</param>
         /// <param name="separator">Separator to use between segments</param>
         /// <returns>Converted string</returns>
+#if NETFRAMEWORK || NETSTANDARD2_0
         public static string FromCamelCase(this string str, string separator)
         {
             // Ensure first letter is always lowercase
@@ -75,5 +109,31 @@ namespace YamlDotNet.Serialization.Utilities
             str = Regex.Replace(str.ToCamelCase(), "(?<char>[A-Z])", match => separator + match.Groups["char"].Value.ToLowerInvariant());
             return str;
         }
+#else
+        public static string FromCamelCase(this string str, string separator)
+        {
+            var tmp = ToCamelCase(str).AsSpan();
+            var output = new StringBuilder(tmp.Length);
+            for (var i = 0; i < tmp.Length; i++)
+            {
+                var c = tmp[i];
+                // Ensure first letter is always lowercase
+                if (i == 0)
+                {
+                    output.Append(char.ToLower(c));
+                    continue;
+                }
+                if (char.IsUpper(c))
+                {
+                    output.Append(separator);
+                    output.Append(char.ToLower(c));
+                    continue;
+                }
+                output.Append(c);
+            }
+
+            return output.ToString();
+        }
+#endif
     }
 }
